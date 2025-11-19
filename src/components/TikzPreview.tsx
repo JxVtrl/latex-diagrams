@@ -114,7 +114,6 @@ export function TikzPreview({ code }: TikzPreviewProps) {
   
   // Depois normaliza automaticamente caracteres não-ASCII
   const normalizedCode = useMemo(() => normalizeToAscii(fixedCommas), [fixedCommas]);
-  const wasNormalized = useMemo(() => trimmed !== normalizedCode, [trimmed, normalizedCode]);
 
   const srcDoc = useMemo(() => {
     if (!normalizedCode) {
@@ -294,19 +293,24 @@ ${safeCode}
                   return;
                 }
 
-                const padding = 60; // margem para controles / bordas
+                const padding = 40; // margem reduzida para usar mais espaço
                 const availableWidth = Math.max(100, containerRect.width - padding);
                 const availableHeight = Math.max(100, containerRect.height - padding);
                 const scaleX = availableWidth / svgWidth;
                 const scaleY = availableHeight / svgHeight;
 
-                // Usa 80% do espaço disponível para deixar o diagrama maior
-                const targetScale = Math.min(scaleX, scaleY) * 0.8;
+                // Usa 95% do espaço disponível e multiplica por 1.5 para deixar o diagrama bem maior
+                const targetScale = Math.min(scaleX, scaleY) * 0.95 * 1.5;
                 
-                // Garante um tamanho mínimo razoável (não muito pequeno)
-                scale = Math.max(1.0, Math.min(maxScale, targetScale));
+                // Garante um tamanho mínimo maior (mínimo 1.5x)
+                scale = Math.max(1.5, Math.min(maxScale, targetScale));
+                
+                // O content já está centralizado com flex, então panX e panY devem ser 0
+                // O transform-origin é center center, então o scale mantém o centro no lugar
+                // Mas precisamos garantir que o SVG esteja realmente centralizado
                 panX = 0;
                 panY = 0;
+                
                 updateTransform();
                 hasFitToView = true;
               }
@@ -471,27 +475,6 @@ ${safeCode}
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {wasNormalized && (
-        <div
-          style={{
-            padding: "12px",
-            marginBottom: "8px",
-            backgroundColor: "#d1ecf1",
-            border: "1px solid #0c5460",
-            borderRadius: "6px",
-            color: "#0c5460",
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 10,
-          }}
-        >
-          <strong>ℹ️ Correção automática aplicada:</strong> Caracteres não-ASCII foram convertidos automaticamente para ASCII/LaTeX.
-          <br />
-          Exemplos: ç→c, ã→a, é→e, ó→o, ε→\varepsilon, →→\to, etc.
-        </div>
-      )}
       <iframe
         title="TikZ Preview"
         srcDoc={srcDoc}
