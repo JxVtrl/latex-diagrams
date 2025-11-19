@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import { KatexPreview } from "./components/KatexPreview";
+import { useState } from "react";
 import { TikzPreview } from "./components/TikzPreview";
+import { KatexPreview } from "./components/KatexPreview";
 import "./App.css";
 
 const defaultExample = String.raw`
@@ -75,9 +75,11 @@ function App() {
             borderRadius: 8,
             padding: containsTikz ? 0 : 8,
             minHeight: containsTikz ? 500 : 80,
+            height: containsTikz ? "600px" : "auto",
             backgroundColor: "#fafafa",
             width: "100%",
-            overflow: "auto",
+            overflow: "hidden",
+            position: "relative",
           }}
         >
           {containsTikz ? (

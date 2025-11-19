@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 
@@ -24,7 +24,7 @@ function normalizeLatex(input: string): string {
   return s;
 }
 
-export const KatexPreview: React.FC<KatexPreviewProps> = ({ code }) => {
+export function KatexPreview({ code }: KatexPreviewProps) {
   const trimmed = code.trim();
 
   if (!trimmed) {
@@ -38,5 +38,5 @@ export const KatexPreview: React.FC<KatexPreviewProps> = ({ code }) => {
       <BlockMath math={math} />
     </div>
   );
-};
+}
 

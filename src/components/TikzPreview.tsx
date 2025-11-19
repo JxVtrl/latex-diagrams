@@ -1,18 +1,8 @@
 // src/components/TikzPreview.tsx
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 
 interface TikzPreviewProps {
   code: string;
-}
-
-/**
- * Detecta caracteres não-ASCII no código TikZ.
- * TikZJax usa btoa() que só aceita Latin1, então caracteres unicode
- * (acentos, símbolos como ε, →, ≥) causam erro.
- */
-function hasNonAsciiChars(text: string): boolean {
-  // Verifica se há caracteres fora do range ASCII (0-127)
-  return /[^\x00-\x7F]/.test(text);
 }
 
 /**
@@ -20,38 +10,21 @@ function hasNonAsciiChars(text: string): boolean {
  * Substitui acentos e símbolos unicode por suas versões compatíveis.
  */
 function normalizeToAscii(text: string): string {
+  // Se o texto já é ASCII puro, não altera nada
+  if (!/[^\x00-\x7F]/.test(text)) {
+    return text
+  }
+
+  // Primeiro remove marcas de acentuação mantendo o caractere base
+  let normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  
+  // Normaliza vírgulas unicode problemáticas para vírgula ASCII padrão
+  // Garante que vírgulas sejam sempre preservadas corretamente
+  // U+201A (single low-9 quotation mark), U+FF0C (fullwidth comma) → vírgula ASCII normal
+  normalized = normalized.replace(/[\u201A\uFF0C]/g, ',')
+  
   // Mapa de substituições: caractere unicode -> versão ASCII/LaTeX
   const replacements: Record<string, string> = {
-    // Acentos e cedilha
-    'ç': 'c',
-    'Ç': 'C',
-    'ã': 'a',
-    'Ã': 'A',
-    'á': 'a',
-    'Á': 'A',
-    'à': 'a',
-    'À': 'A',
-    'â': 'a',
-    'Â': 'A',
-    'é': 'e',
-    'É': 'E',
-    'ê': 'e',
-    'Ê': 'E',
-    'í': 'i',
-    'Í': 'I',
-    'ó': 'o',
-    'Ó': 'O',
-    'ô': 'o',
-    'Ô': 'O',
-    'õ': 'o',
-    'Õ': 'O',
-    'ú': 'u',
-    'Ú': 'U',
-    'ü': 'u',
-    'Ü': 'U',
-    'ñ': 'n',
-    'Ñ': 'N',
-    
     // Símbolos matemáticos comuns
     'ε': '\\varepsilon',
     '→': '\\to',
@@ -110,8 +83,6 @@ function normalizeToAscii(text: string): string {
     '∠': '\\angle',
   };
 
-  let normalized = text;
-  
   // Aplica todas as substituições
   for (const [unicode, ascii] of Object.entries(replacements)) {
     normalized = normalized.replace(new RegExp(unicode, 'g'), ascii);
@@ -120,12 +91,29 @@ function normalizeToAscii(text: string): string {
   return normalized;
 }
 
+/**
+ * Corrige vírgulas dentro de expressões matemáticas para renderizar corretamente no TikZJax
+ * Substitui vírgulas por \text{,} para evitar o bug do "c elevado"
+ */
+function fixCommasInMath(text: string): string {
+  // Substitui vírgulas dentro de expressões matemáticas ($...$) por \text{,}
+  // Isso força a vírgula a ser renderizada como texto, não como símbolo matemático
+  return text.replace(/\$([^$]+)\$/g, (_match, content) => {
+    // Substitui vírgulas que estão entre termos matemáticos por \text{,}
+    // Preserva a aparência visual mas corrige o bug do TikZJax
+    const fixed = content.replace(/,/g, '\\text{,}');
+    return `$${fixed}$`;
+  });
+}
+
 export function TikzPreview({ code }: TikzPreviewProps) {
   const trimmed = code.trim();
-  const hasNonAscii = useMemo(() => hasNonAsciiChars(trimmed), [trimmed]);
   
-  // Normaliza automaticamente caracteres não-ASCII
-  const normalizedCode = useMemo(() => normalizeToAscii(trimmed), [trimmed]);
+  // Primeiro corrige vírgulas em modo matemático
+  const fixedCommas = useMemo(() => fixCommasInMath(trimmed), [trimmed]);
+  
+  // Depois normaliza automaticamente caracteres não-ASCII
+  const normalizedCode = useMemo(() => normalizeToAscii(fixedCommas), [fixedCommas]);
   const wasNormalized = useMemo(() => trimmed !== normalizedCode, [trimmed, normalizedCode]);
 
   const srcDoc = useMemo(() => {
@@ -138,7 +126,6 @@ export function TikzPreview({ code }: TikzPreviewProps) {
             <style>
               body {
                 font-family: system-ui, sans-serif;
-                font-size: 14px;
                 color: #666;
                 padding: 12px;
               }
@@ -151,6 +138,7 @@ export function TikzPreview({ code }: TikzPreviewProps) {
       `;
     }
 
+    // Escapa apenas </script para não quebrar a tag HTML
     const safeCode = normalizedCode.replace(/<\/script/gi, "<\\/script");
 
     return `
@@ -158,59 +146,331 @@ export function TikzPreview({ code }: TikzPreviewProps) {
       <html>
         <head>
           <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=50.0, user-scalable=yes">
           <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
           <script src="https://tikzjax.com/v1/tikzjax.js"></script>
           <style>
             * {
               box-sizing: border-box;
             }
+            html {
+              width: 100%;
+              height: 100%;
+            }
             body {
               margin: 0;
               padding: 0;
               width: 100%;
-              overflow-x: auto;
-              overflow-y: auto;
+              height: 100%;
+              overflow: hidden;
+              touch-action: none;
             }
-            /* Container do TikZJax - ocupa toda a largura */
+            /* Container do TikZJax com zoom e pan */
+            .tikzjax-container {
+              width: 100%;
+              height: 100%;
+              position: relative;
+              overflow: hidden;
+              cursor: grab;
+              background: #fff;
+            }
+            .tikzjax-container.dragging {
+              cursor: grabbing;
+            }
             .tikzjax {
               width: 100%;
-              min-height: 100%;
+              height: 100%;
               display: flex;
               justify-content: center;
-              align-items: flex-start;
+              align-items: center;
               padding: 20px;
+              transform-origin: center center;
+              transition: transform 0.1s ease-out;
             }
-            /* Aumenta o tamanho do SVG renderizado pelo TikZJax */
+            /* SVG responsivo */
             svg {
-              width: 100% !important;
-              height: auto !important;
-              max-width: 100% !important;
-              transform: scale(1.8);
-              transform-origin: center top;
+              max-width: 100%;
+              max-height: 100%;
+              width: auto;
+              height: auto;
+              display: block;
             }
-            /* Aumenta o tamanho da fonte dentro do SVG */
-            svg text {
-              font-size: 18px !important;
+            /* Controles de zoom */
+            .zoom-controls {
+              position: absolute;
+              top: 10px;
+              right: 10px;
+              z-index: 1000;
+              display: flex;
+              flex-direction: column;
+              gap: 8px;
             }
-            /* Garante que o SVG seja visível e grande */
-            svg g {
-              transform: scale(1);
+            .zoom-btn {
+              width: 40px;
+              height: 40px;
+              border: 1px solid #ccc;
+              background: white;
+              border-radius: 4px;
+              cursor: pointer;
+              font-size: 20px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              user-select: none;
+            }
+            .zoom-btn:hover {
+              background: #f0f0f0;
+            }
+            .zoom-btn:active {
+              background: #e0e0e0;
+            }
+            .zoom-reset {
+              font-size: 16px;
             }
           </style>
         </head>
         <body>
-          <div class="tikzjax">
-            <script type="text/tikz">
+          <div class="tikzjax-container" id="tikzContainer">
+            <div class="tikzjax" id="tikzContent">
+              <script type="text/tikz">
 ${safeCode}
-            </script>
+              </script>
+            </div>
+            <div class="zoom-controls">
+              <button class="zoom-btn" id="zoomIn">+</button>
+              <button class="zoom-btn zoom-reset" id="zoomReset">⌂</button>
+              <button class="zoom-btn" id="zoomOut">−</button>
+            </div>
           </div>
+          <script>
+            (function() {
+              const container = document.getElementById('tikzContainer');
+              const content = document.getElementById('tikzContent');
+              const zoomInBtn = document.getElementById('zoomIn');
+              const zoomOutBtn = document.getElementById('zoomOut');
+              const zoomResetBtn = document.getElementById('zoomReset');
+              
+              let scale = 1;
+              let panX = 0;
+              let panY = 0;
+              let isDragging = false;
+              let startX = 0;
+              let startY = 0;
+              let startPanX = 0;
+              let startPanY = 0;
+              let hasFitToView = false;
+              
+              const minScale = 0.5;
+              const maxScale = 50;
+              
+              function updateTransform() {
+                content.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${scale})\`;
+              }
+
+              function fitToView() {
+                const svg = content.querySelector('svg');
+                if (!svg) return;
+
+                // Temporariamente reseta transform para medir tamanho original
+                content.style.transform = 'translate(0px, 0px) scale(1)';
+                
+                // Usa viewBox ou getBBox para obter dimensões reais do SVG
+                let svgWidth, svgHeight;
+                try {
+                  const bbox = svg.getBBox();
+                  svgWidth = bbox.width || svg.clientWidth || svg.getBoundingClientRect().width;
+                  svgHeight = bbox.height || svg.clientHeight || svg.getBoundingClientRect().height;
+                } catch (e) {
+                  const svgRect = svg.getBoundingClientRect();
+                  svgWidth = svgRect.width;
+                  svgHeight = svgRect.height;
+                }
+
+                const containerRect = container.getBoundingClientRect();
+
+                if (svgWidth === 0 || svgHeight === 0) {
+                  updateTransform();
+                  return;
+                }
+
+                const padding = 60; // margem para controles / bordas
+                const availableWidth = Math.max(100, containerRect.width - padding);
+                const availableHeight = Math.max(100, containerRect.height - padding);
+                const scaleX = availableWidth / svgWidth;
+                const scaleY = availableHeight / svgHeight;
+
+                // Usa 80% do espaço disponível para deixar o diagrama maior
+                const targetScale = Math.min(scaleX, scaleY) * 0.8;
+                
+                // Garante um tamanho mínimo razoável (não muito pequeno)
+                scale = Math.max(1.0, Math.min(maxScale, targetScale));
+                panX = 0;
+                panY = 0;
+                updateTransform();
+                hasFitToView = true;
+              }
+              
+              function zoom(factor, centerX, centerY) {
+                const oldScale = scale;
+                scale = Math.max(minScale, Math.min(maxScale, scale * factor));
+                
+                if (centerX !== undefined && centerY !== undefined) {
+                  const rect = container.getBoundingClientRect();
+                  const x = centerX - rect.left;
+                  const y = centerY - rect.top;
+                  
+                  panX = x - (x - panX) * (scale / oldScale);
+                  panY = y - (y - panY) * (scale / oldScale);
+                }
+                
+                updateTransform();
+              }
+              
+              function resetZoom() {
+                hasFitToView = false;
+                fitToView();
+              }
+              
+              // Zoom com scroll
+              container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const factor = e.deltaY > 0 ? 0.9 : 1.1;
+                zoom(factor, e.clientX, e.clientY);
+              }, { passive: false });
+              
+              // Pan com mouse
+              container.addEventListener('mousedown', (e) => {
+                if (e.button === 0) {
+                  isDragging = true;
+                  container.classList.add('dragging');
+                  startX = e.clientX;
+                  startY = e.clientY;
+                  startPanX = panX;
+                  startPanY = panY;
+                }
+              });
+              
+              document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                  panX = startPanX + (e.clientX - startX);
+                  panY = startPanY + (e.clientY - startY);
+                  updateTransform();
+                }
+              });
+              
+              document.addEventListener('mouseup', () => {
+                isDragging = false;
+                container.classList.remove('dragging');
+              });
+              
+              // Touch events para pinch zoom e pan
+              let lastTouchDistance = 0;
+              let lastTouchCenter = { x: 0, y: 0 };
+              
+              container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                  isDragging = true;
+                  startX = e.touches[0].clientX;
+                  startY = e.touches[0].clientY;
+                  startPanX = panX;
+                  startPanY = panY;
+                } else if (e.touches.length === 2) {
+                  const touch1 = e.touches[0];
+                  const touch2 = e.touches[1];
+                  lastTouchDistance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                  );
+                  lastTouchCenter = {
+                    x: (touch1.clientX + touch2.clientX) / 2,
+                    y: (touch1.clientY + touch2.clientY) / 2
+                  };
+                }
+              }, { passive: false });
+              
+              container.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (e.touches.length === 1 && isDragging) {
+                  panX = startPanX + (e.touches[0].clientX - startX);
+                  panY = startPanY + (e.touches[0].clientY - startY);
+                  updateTransform();
+                } else if (e.touches.length === 2) {
+                  const touch1 = e.touches[0];
+                  const touch2 = e.touches[1];
+                  const distance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                  );
+                  
+                  if (lastTouchDistance > 0) {
+                    const factor = distance / lastTouchDistance;
+                    zoom(factor, lastTouchCenter.x, lastTouchCenter.y);
+                  }
+                  
+                  lastTouchDistance = distance;
+                  lastTouchCenter = {
+                    x: (touch1.clientX + touch2.clientX) / 2,
+                    y: (touch1.clientY + touch2.clientY) / 2
+                  };
+                }
+              }, { passive: false });
+              
+              container.addEventListener('touchend', () => {
+                isDragging = false;
+                lastTouchDistance = 0;
+              });
+              
+              // Botões de zoom
+              zoomInBtn.addEventListener('click', () => zoom(1.2));
+              zoomOutBtn.addEventListener('click', () => zoom(0.8));
+              zoomResetBtn.addEventListener('click', resetZoom);
+              
+              // Aguarda o SVG ser renderizado e ter dimensões válidas
+              const checkSVG = setInterval(() => {
+                const svg = content.querySelector('svg');
+                if (svg) {
+                  try {
+                    const bbox = svg.getBBox();
+                    // Verifica se o SVG tem dimensões válidas
+                    if (bbox.width > 0 && bbox.height > 0) {
+                      clearInterval(checkSVG);
+                      // Pequeno delay para garantir que o SVG está totalmente renderizado
+                      setTimeout(() => {
+                        if (!hasFitToView) {
+                          fitToView();
+                        } else {
+                          updateTransform();
+                        }
+                      }, 50);
+                    }
+                  } catch (e) {
+                    // Se getBBox falhar, tenta com getBoundingClientRect
+                    const rect = svg.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                      clearInterval(checkSVG);
+                      setTimeout(() => {
+                        if (!hasFitToView) {
+                          fitToView();
+                        } else {
+                          updateTransform();
+                        }
+                      }, 50);
+                    }
+                  }
+                }
+              }, 100);
+              
+              setTimeout(() => clearInterval(checkSVG), 5000);
+            })();
+          </script>
         </body>
       </html>
     `;
   }, [normalizedCode]);
 
   return (
-    <div>
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
       {wasNormalized && (
         <div
           style={{
@@ -219,8 +479,12 @@ ${safeCode}
             backgroundColor: "#d1ecf1",
             border: "1px solid #0c5460",
             borderRadius: "6px",
-            fontSize: "13px",
             color: "#0c5460",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
           }}
         >
           <strong>ℹ️ Correção automática aplicada:</strong> Caracteres não-ASCII foram convertidos automaticamente para ASCII/LaTeX.
@@ -234,6 +498,7 @@ ${safeCode}
         sandbox="allow-scripts"
         style={{
           width: "100%",
+          height: "100%",
           minHeight: "500px",
           borderRadius: "8px",
           border: "1px solid #e0e0e0",
